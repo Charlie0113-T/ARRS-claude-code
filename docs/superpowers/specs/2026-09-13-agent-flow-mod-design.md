@@ -27,8 +27,12 @@
 mods/agent-flow/
   .claude-plugin/plugin.json
   README.md              # 挂了哪些事件、调了 $ 的哪些名词、怎么试
-  tsconfig.json          # 独立于本仓库做类型检查时用，指向 /plugin-types 写出的 .claude/types
-  bunfig.toml            # bun test 的 preload，注入测试用的 h 和 Fragment
+  tsconfig.json          # 独立于本仓库做类型检查时用；paths 把 claude-code/testing 映射到 bun/kit.ts
+  bunfig.toml            # bun test 的 preload
+  bun/
+    preload.ts           # 定义全局 h / Fragment，产出 {type, props, children} 纯数据
+    kit.ts               # 用 bun:test 实现 claude-code/testing 的 describe/test/expect/tier
+    bun-test.d.ts        # bun:test 的环境声明，只给独立 tsconfig 用；mods/tsconfig.json 不包含 bun/
   hooks/
     hooks.json           # {"description": "...", "modules": ["./register.ts"]}
     register.ts          # 入口：session.start 建 host，注册 /flow，把事件接到 reducer 和视图
@@ -43,8 +47,7 @@ mods/agent-flow/
     pane-toggle/         # /flow 该开、该关还是太窄，纯函数
   tests/
     fixtures/
-    preload.ts           # 定义 globalThis.h / Fragment，产出 {type, props, children} 纯数据
-    *.test.ts            # 纯函数测试，按所覆盖的单元命名，bun test 直接跑
+    *.test.ts            # 纯函数测试，按所覆盖的单元命名，从 claude-code/testing 导入，bun test 直接跑
     register.kit.ts      # 按 claude-code/testing 写的入口测试，等 claude plugin test 上线后改名为 register.test.ts
   scripts/
     smoke.exp            # expect 冒烟脚本，手动跑
