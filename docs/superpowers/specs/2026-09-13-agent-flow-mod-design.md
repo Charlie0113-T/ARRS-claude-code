@@ -1,7 +1,7 @@
 # Agent flow mod 设计（第一阶段）
 
 - 日期：2026-09-13
-- 状态：待 Charles 审阅
+- 状态：已批准；第一阶段已实现（见 mods/agent-flow）
 - 范围：Claude Code 的一个 mod，`/flow` 在 transcript 旁边打开一个面板，实时显示本会话的子 agent 和 teammates 树。第一阶段只读加展开。
 
 ## 0. 背景与决策
