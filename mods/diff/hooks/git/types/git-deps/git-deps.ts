@@ -33,6 +33,15 @@ export type GitDeps = {
   sessionStartMs: number
 
   /**
+   * The paths dirty when the backend was pinned, at the session's start
+   * (Probes.dirtyPathsOf); null when unlisted, absent where none is kept.
+   *
+   * A path absent from it turned up during the session (a rename's new
+   * name, a file moved in), whatever timestamp it carries.
+   */
+  baseline?: ReadonlySet<string> | null
+
+  /**
    * Told each time branch mode resolves its base, for telemetry.
    */
   onBranchBase: (base: BranchBase) => void

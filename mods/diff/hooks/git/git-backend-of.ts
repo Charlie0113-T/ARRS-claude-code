@@ -14,7 +14,8 @@ import type Types from './types'
  * one `rev-parse` in that directory, then every child pinned to it.
  *
  * Each child runs with `--git-dir`, `--work-tree` and cwd the top, under
- * the C locale and the fetch's timeout (the built-in's execPinnedGit).
+ * the C locale and the fetch's timeout (the built-in's execPinnedGit); the
+ * paths dirty at the start are read once, first (Probes.dirtyPathsOf).
  *
  * @param host the bound host's runner and probes
  * @returns the backend, or null outside a git working tree
@@ -46,6 +47,7 @@ export async function gitBackendOf(
   }
 
   const run = runOf(repository)
+  const baseline = await Probes.dirtyPathsOf(run)
 
   const depsOf = (): Types.GitDeps => ({
     run,
@@ -53,6 +55,7 @@ export async function gitBackendOf(
     mtimeOf: host.mtimeOf,
     entryKindsOf: host.entryKindsOf,
     sessionStartMs: host.sessionStartMsOf(),
+    baseline,
     onBranchBase: host.onBranchBase,
   })
 

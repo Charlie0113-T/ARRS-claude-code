@@ -1,4 +1,4 @@
-// Written by Claude Code 2.1.269.
+// Written by Claude Code 2.1.271.
 // Claude Code function hooks: the plugin API's TypeScript declarations.
 //
 // EARLY ACCESS: this surface may change between releases without notice.
@@ -42,9 +42,24 @@
 //     },
 //     "include": [".claude/types", "hooks", "tests"]
 //   }
-// ".claude/types" is where /plugin-types writes; "hooks" is the plugin's
-// hooks/ folder and "tests" its test files. `lib` names no DOM: the
-// environment has none, and the DOM's own `Text` would shadow the element.
+// ".claude/types" is where /plugin-types writes this file and, beside it,
+// claude-code-mcp.d.ts and claude-code-plugins.d.ts, the index of the
+// enabled plugins' type contracts, each copied to claude-code-plugins/
+// <plugin>.d.ts: what a plugin adds to `$` in engine.create, so a plugin
+// you depend on is typed with nothing copied (the include above takes the
+// whole folder). "hooks" is the plugin's hooks/ folder and "tests" its test
+// files. `lib` names no DOM: the environment has none, and its `Text`
+// would shadow the element.
+//
+// A plugin that adds a noun to `$` ships its own contract: a .d.ts its
+// plugin.json names as "types", exporting the noun's types at its top level
+// and declaring the noun on the engine's interface,
+//   export type Topo = { ... }
+//   declare module 'claude-code' {
+//     interface EngineInterface { topo: Topo }
+//   }
+// with no import or reference, its exported names led by the noun's
+// PascalCase name; the plugin's own hooks module imports them from it.
 
 declare module 'claude-code' {
   /**
@@ -620,8 +635,8 @@ declare module 'claude-code' {
    * label, the closure a press runs, and the label styles a hover overrides.
    *
    * The terminal draws `[ label ]` (or `1: label` when `plain`), a desktop a
-   * native button; a click, a `hotkey`, or Enter while it has the focus
-   * (`abovePrompt:focus`) raises `ui.press`, whose bottom is `onPress`. A leaf.
+   * native button; a click, a `hotkey`, the chord for its `action`, or Enter
+   * while it has the focus raises `ui.press`, whose bottom is `onPress`.
    */
   export type ButtonProps = {
       /**
@@ -643,10 +658,33 @@ declare module 'claude-code' {
        */
       hotkey?: string;
       /**
+       * An engine keybinding action (`"app:cycleDiffBase"`) whose chord, as the
+       * person bound it, presses this from the prompt; unknown names refused.
+       *
+       * Chords, or a modified key Global or an active context binds, on the
+       * terminal while mounted, no dialog up and no engine handler of the action
+       * mounted; a pane's over the band's over another's, then the last drawn.
+       */
+      action?: string;
+      /**
        * Drawn without chrome: the hotkey in the accent color, a colon, the
        * label (`1: Yes`), as a survey's row reads.
        */
       plain?: true;
+      /**
+       * The label drawn dim at rest, as `Text`'s `dimColor`, and at full strength
+       * under the pointer or the focus: a secondary control, a path in a list.
+       */
+      dimColor?: boolean;
+      /**
+       * The site's focus ring starts here when the site takes the keyboard,
+       * instead of on nothing, as the DOM's `autofocus`: Enter acts on it at once.
+       *
+       * A pane opened with `focus`, or the person's focus chord or click, is the
+       * take. Of several in one site the first drawn wins; it raises `ui.focus`,
+       * origin this plugin. A ring the person has moved stays where it was put.
+       */
+      autoFocus?: true;
       /**
        * Label style overrides (the `Text` set) applied by the surface while the
        * nearest enclosing keyed `Box`, or given a `scope` its group, is hovered.
@@ -891,13 +929,13 @@ declare module 'claude-code' {
 
   /**
    * The element table a surface module draws with, `surface.elements`: the
-   * terminal's constructors (Elements) less `Client` (none nests).
+   * terminal's (Elements) less `Client` (none nests) and `Raster` (needs `$`).
    *
    * What `$.ui.resolve(e)` is to a hooks module, with no `$` and no hook
    * between: `const { Box, Text } = surface.elements`, then `<Box>`. A Button,
    * Input or Select keeps its handler here and still raises `ui.press` etc.
    */
-  export type ClientElements = Omit<Elements['terminal'], 'Client'>;
+  export type ClientElements = Omit<Elements['terminal'], 'Client' | 'Raster'>;
 
   /**
    * One key the person pressed while a `Client` had the focus, as
@@ -1210,10 +1248,32 @@ declare module 'claude-code' {
   };
 
   /**
-   * `command.run`'s input as a plugin's `$.command.run` takes it: `args` may
-   * be left out (`/command`, bare), and `origin` is the engine's to set.
+   * Where a command's answer will show: which of the terminal's two layouts
+   * the surface renders, and how wide it is when the command runs.
+   *
+   * A fact the engine stamps on `command.run`, so a command that draws (opens
+   * a pane, prints a wide table) can suit the room it has: the fullscreen
+   * layout docks a pane beside the transcript from 110 columns, the main
+   * screen places it inline above the prompt at any width.
    */
-  export type CommandRunArgs = Omit<CommandRunInput, 'origin' | 'args'> & {
+  export type CommandPresentation = {
+      /**
+       * True under the fullscreen (alternate-screen) layout; false on the main
+       * screen (`CLAUDE_CODE_NO_FLICKER=0`, tmux by default) and headless.
+       */
+      isFullscreen: boolean;
+      /**
+       * The terminal's width in cells as the command runs; 80 where no terminal
+       * has measured (headless with no tty).
+       */
+      columns: number;
+  };
+
+  /**
+   * `command.run`'s input as a plugin's `$.command.run` takes it: `args` may
+   * be left out (`/command`, bare); `origin` and `presentation` the engine sets.
+   */
+  export type CommandRunArgs = Omit<CommandRunInput, 'origin' | 'args' | 'presentation'> & {
       /**
        * Everything after the name, as the person would type it; left out, `""`.
        */
@@ -1243,6 +1303,14 @@ declare module 'claude-code' {
        * passes it on as received.
        */
       origin: PromptOrigin;
+      /**
+       * Where the command's answer will show (CommandPresentation): the
+       * fullscreen layout or the main screen, and the terminal's width.
+       *
+       * Pinned: the engine stamps it, `next(e)` passes it on, a rewrite that
+       * leaves it out keeps it and one that changes it is refused.
+       */
+      presentation: CommandPresentation;
   };
 
   /**
@@ -1489,6 +1557,246 @@ declare module 'claude-code' {
   export type ConfigValue = boolean | string | number | readonly string[];
 
   /**
+   * One custom agent whose description the Agent tool's prompt carries;
+   * built-in agents are left out.
+   */
+  export type ContextAgent = {
+      /**
+       * The agent's type, as the Agent tool names it.
+       */
+      agentType: string;
+      /**
+       * Where it was defined, by the engine's word (`projectSettings`,
+       * `userSettings`, `plugin`); the display label is the renderer's.
+       */
+      source: string;
+      /**
+       * The description's estimated tokens.
+       */
+      tokens: number;
+  };
+
+  /**
+   * The token counts the last API response of the live window reported, as
+   * the API spells them; the breakdown's `Messages` row is reconciled to it.
+   */
+  export type ContextApiUsage = {
+      /**
+       * Uncached input tokens the response was answered over.
+       */
+      input_tokens: number;
+      /**
+       * Tokens the response generated.
+       */
+      output_tokens: number;
+      /**
+       * Input tokens written to the prompt cache by the request.
+       */
+      cache_creation_input_tokens: number;
+      /**
+       * Input tokens read from the prompt cache by the request.
+       */
+      cache_read_input_tokens: number;
+  };
+
+  /**
+   * How a context breakdown is counted: `full` with the token-count API per
+   * category, `summary` from the last response's usage and local estimates.
+   *
+   * The SDK's `get_context_usage` takes the same two words as its `detail`.
+   */
+  export type ContextBreakdownDetail = 'summary' | 'full';
+
+  /**
+   * One row of the breakdown, as /context lists it beside the grid (`System
+   * prompt`, `Messages`, `Free space`, `Autocompact buffer`).
+   */
+  export type ContextCategory = {
+      /**
+       * The row's label as /context prints it.
+       */
+      name: string;
+      /**
+       * The row's estimated tokens; a `deferred` row's do not count toward the
+       * total.
+       */
+      tokens: number;
+      /**
+       * The theme colour /context draws the row and its squares in, by its key
+       * in the theme (`promptBorder`, `inactive`, `permission`).
+       */
+      color: string;
+      /**
+       * Whether the row is tool schemas loaded on demand, which the grid leaves
+       * out; the same fact as `kind` `deferred`.
+       */
+      isDeferred: boolean;
+      /**
+       * What the row is (ContextCategoryKind), stamped by the engine.
+       */
+      kind: ContextCategoryKind;
+  };
+
+  /**
+   * What a breakdown row is; branch on this, never on the row's `name`.
+   *
+   * `used` content occupies the window, `free` is the window left, `buffer`
+   * the compaction reserve, `deferred` tool schemas loaded on demand and
+   * outside the window.
+   */
+  export type ContextCategoryKind = 'used' | 'free' | 'buffer' | 'deferred';
+
+  /**
+   * One square of the grid /context draws: which row it belongs to and how
+   * full it is.
+   */
+  export type ContextGridSquare = {
+      /**
+       * The theme colour of the square's row, by its key in the theme.
+       */
+      color: string;
+      /**
+       * Whether the square holds any of its row's tokens.
+       */
+      isFilled: boolean;
+      /**
+       * The `name` of the row the square belongs to (`Free space` for the
+       * window left).
+       */
+      categoryName: string;
+      /**
+       * The row's tokens, repeated on each of its squares.
+       */
+      tokens: number;
+      /**
+       * The row's share of the window as a whole percentage, repeated likewise.
+       */
+      percentage: number;
+      /**
+       * How full this one square is, 0 to 1: a row's last square is the partial
+       * one (/context draws it hollow under 0.7).
+       */
+      squareFullness: number;
+  };
+
+  /**
+   * One MCP tool's schema as the context carries it.
+   */
+  export type ContextMcpTool = {
+      /**
+       * The tool's wire name (`mcp__linear__create_issue`).
+       */
+      name: string;
+      /**
+       * The server it belongs to, as /mcp lists it.
+       */
+      serverName: string;
+      /**
+       * The schema's estimated tokens.
+       */
+      tokens: number;
+      /**
+       * Whether the schema is inside the window now: always, unless tool
+       * schemas load on demand and this one has not been searched for yet.
+       */
+      isLoaded: boolean;
+  };
+
+  /**
+   * One memory file the context carries (a CLAUDE.md, a rules file, an
+   * auto-memory entry).
+   */
+  export type ContextMemoryFile = {
+      /**
+       * The file's path, absolute.
+       */
+      path: string;
+      /**
+       * The display label of where it was loaded from (`Project`, `User`,
+       * `Local`, `Managed`, `AutoMem`).
+       */
+      type: string;
+      /**
+       * The file's estimated tokens.
+       */
+      tokens: number;
+  };
+
+  /**
+   * One skill whose listing the context carries.
+   */
+  export type ContextSkill = {
+      /**
+       * The skill's name as `/skills` lists it.
+       */
+      name: string;
+      /**
+       * Where it came from, by the engine's word (`userSettings`, `plugin`,
+       * `built-in`, `mcp`, `syncedSkills`); the display label is the renderer's.
+       */
+      source: string;
+      /**
+       * The providing plugin's name, when the skill comes from one.
+       */
+      pluginName?: string;
+      /**
+       * The listing's estimated tokens.
+       */
+      tokens: number;
+  };
+
+  /**
+   * The skills the context lists for the model: how many there are, how many
+   * fit the listing's budget, and each one's share.
+   */
+  export type ContextSkills = {
+      /**
+       * How many skills the session has.
+       */
+      totalSkills: number;
+      /**
+       * How many the listing included within its token budget.
+       */
+      includedSkills: number;
+      /**
+       * The listing's tokens in all.
+       */
+      tokens: number;
+      /**
+       * One entry per listed skill.
+       */
+      skillFrontmatter: ContextSkill[];
+  };
+
+  /**
+   * The slash commands the Skill tool's prompt lists, counted.
+   */
+  export type ContextSlashCommands = {
+      /**
+       * How many commands the session has.
+       */
+      totalCommands: number;
+      /**
+       * How many the listing included.
+       */
+      includedCommands: number;
+      /**
+       * The listing's tokens in all.
+       */
+      tokens: number;
+  };
+
+  /**
+   * How the window the breakdown measures against was settled; /context
+   * prints its `Auto-compact window` line off this.
+   *
+   * `auto` is the model's own limit; the rest name a compaction window by who
+   * set it: the `CLAUDE_CODE_AUTO_COMPACT_WINDOW` variable, the settings, the
+   * account, an experiment, the model's default, or an unrecognised model's.
+   */
+  export type ContextWindowSource = 'env' | 'settings' | 'clientdata' | 'experiment' | 'model-default' | 'unknown-model' | 'auto';
+
+  /**
    * The plugin's identity (`plugin`) and the nouns core contributes to `$` as
    * the innermost step of the `engine.create` fold.
    *
@@ -1510,8 +1818,8 @@ declare module 'claude-code' {
           root: string;
       };
       /**
-       * Display: a line under an open dialog, a redraw request, a transcript
-       * line, a pane the surface places, a window scrolled.
+       * Display: a line under an open dialog, a redraw or a repaint, a
+       * transcript line, a pane the surface places, a window or a ring moved.
        */
       ui: {
           /**
@@ -1531,14 +1839,31 @@ declare module 'claude-code' {
            * Re-runs an event whose results the engine caches: `ui.render` draws the
            * instances this plugin may draw again; the others drop the cached answers.
            *
-           * A render hook whose state changed (a countdown) calls this for a redraw,
-           * at most ten a second (calls sooner fold into one); a `prompt.section` or
-           * `prompt.context` hook whose inputs changed calls it: dropped next turn.
+           * A render hook whose state changed (a countdown) calls it for a redraw, at
+           * most ten a second, thirty for the shown pane and the band (calls sooner
+           * fold); a `prompt.section` or `prompt.context` hook: dropped next turn.
            *
            * @param event `ui.render`, `prompt.section`, `prompt.context`,
            *              `tool.describe`, `command.describe` or `config.describe`
            */
           invalidate: (event: InvalidatableEventName) => void;
+          /**
+           * Repaints a `Raster` this plugin's own render hook drew, still mounted,
+           * with new cells, without the redraw `invalidate` asks for.
+           *
+           * The surface keeps the cells for that Raster (by site and `key`) and
+           * paints them at its next frame, so blits between frames fold into one:
+           * an animation runs at the frame rate. A resize is a redraw instead.
+           *
+           * @param args `requestId` (the site), `key` (the Raster's), `cells`
+           *             (RasterProps), `columns` and `rows` (the mounted size)
+           * @returns `{}` once the cells are its next frame, or `{ deny }` (not
+           *          mounted, not this plugin's, another size, cells that do not
+           *          decode)
+           * @example
+           * $.clock.every(33, () => $.ui.blit({ requestId, key, cells: frame() }))
+           */
+          blit: (args: UiBlitArgs) => Promise<UiBlitResult>;
           /**
            * The elements of the surface `e` is drawn on (Elements[e.surface]): a
            * frozen table of constructors, the JSX tags a render hook draws with.
@@ -1615,18 +1940,21 @@ declare module 'claude-code' {
            * on `ui.open` may refuse it. The keyboard is the person's; unasked, it
            * waits undrawn below 144 columns (110 once asked), judged at each open.
            *
-           * @param pane `id` (1-64 of letters, digits, `_`, `-`), `title`, `focus`
+           * @param pane `id` (1-64 of letters, digits, `_`, `-`), `title`, `focus`,
+           *   `closeOnEscape` and `holdToasts` (a dialog), `rows` it wants inline
            * @returns settles once the pane is open (or retitled)
            * @example
            * await $.ui.open({ id: "clock", title: "Clock" })
+           * @example
+           * await $.ui.open({ id: "ask", focus: true, closeOnEscape: true, rows: 9 })
            */
           open: (pane: PaneOpenArgs) => Promise<void>;
           /**
            * Closes one of the open panes; an id that is not open is left alone.
            *
            * Every close raises `ui.close`, `e.origin` naming whose it is: this call
-           * (`plugin`), the person's (`person`), an unload (`unload`). A hook that
-           * answers without `next` keeps the pane open, except on an unload.
+           * (`plugin`), the person's mark or key (`person`), an unload (`unload`).
+           * A hook answering without `next` keeps the pane open, save on an unload.
            *
            * @param pane `id`: the id the pane was opened under
            * @returns settles once the pane is gone or a hook answered for it;
@@ -1650,6 +1978,21 @@ declare module 'claude-code' {
            * onPress: () => $.ui.scroll({ in: "log", to: "end" })
            */
           scroll: (args: UiScrollArgs) => Promise<UiScrollResult>;
+          /**
+           * Moves the focus ring of one of this plugin's sites onto an element it
+           * drew there, as the DOM's `element.focus()`, while it holds the keys.
+           *
+           * Raised as the event `ui.focus`, origin `plugin`; the engine's inverse
+           * marks the element. The keyboard is the person's to give: a site not
+           * holding it, or holding it on another plugin's element, is `{ deny }`.
+           *
+           * @param args `requestId` (which site: a pane's id, the band's) and `key`
+           *             (the element's, as drawn)
+           * @returns `{}` once it moved, or `{ deny }` saying why not
+           * @example
+           * onPress: () => $.ui.focus({ requestId: "files", key: "row:0" })
+           */
+          focus: (args: UiFocusArgs) => Promise<UiFocusResult>;
       };
       /**
        * Completions through the session's own client and credentials.
@@ -1823,19 +2166,24 @@ declare module 'claude-code' {
            */
           surface: () => Promise<RenderSurface | null>;
           /**
-           * Returns how full the context window is, the account's rate-limit
-           * windows, and the session's cost: the status line's own figures.
+           * Returns the context window's fill, the rate-limit windows and the
+           * cost, as the status line has them; with `breakdown`, by category too.
            *
-           * `context` is the live window (past the last compaction) against the
-           * session model's size, its `tokens` and `percent` there once a response
-           * came back; `rateLimits`, the windows the last response reported.
+           * The plain call costs nothing; `"full"` counts each category with the
+           * token-count API as /context does, `"summary"` estimates locally, and
+           * `context.breakdown` comes back in the SDK's `get_context_usage` shape.
            *
+           * @param args `{ breakdown, columns }`: how the breakdown is counted and
+           *   the width its grid is drawn in; nothing for the status line's figures
            * @returns `{ context, rateLimits, cost }` as the status line has them
            * @example
            * const { context } = await $.session.usage()
            * if ((context.percent ?? 0) >= 85) await $.session.compact()
+           * @example
+           * const usage = await $.session.usage({ breakdown: "full", columns })
+           * for (const row of usage.context.breakdown?.gridRows ?? []) draw(row)
            */
-          usage: () => Promise<SessionUsage>;
+          usage: (args?: SessionUsageArgs) => Promise<SessionUsage>;
           /**
            * Compacts the conversation: the event `session.compact` with `trigger`
            * `plugin`, the same call `/compact` makes, between turns.
@@ -2367,8 +2715,8 @@ declare module 'claude-code' {
    * `$.ui.resolve(e)` returns and a `ui.resolve` hook passes on; no globals.
    *
    * All carry `Box`, `Text`, `Button`, `Link`, `Code`; terminal and desktop add
-   * `Input`, `Select`, `Client`; desktop and mobile add `Svg`. Narrowed on
-   * `e.surface`, that table; unnarrowed, the union; a name lacking, a fragment.
+   * `Input`, `Select`, `Client`; desktop and mobile `Svg`; terminal `Raster`.
+   * Narrowed on `e.surface`, that table; unnarrowed, the union; else fragments.
    */
   export type Elements = {
       terminal: {
@@ -2380,6 +2728,7 @@ declare module 'claude-code' {
           Link: ElementConstructor<LinkProps>;
           Code: ElementConstructor<CodeProps>;
           Client: ElementConstructor<ClientProps>;
+          Raster: ElementConstructor<RasterProps>;
       };
       desktop: {
           Box: ElementConstructor<BoxProps>;
@@ -2550,17 +2899,29 @@ declare module 'claude-code' {
        */
       'ui.message': UiMessageArgument;
       /**
-       * Fires when a site's window moves: the person's wheel or scroll keys on a
-       * `Pane` body or the `AbovePrompt` band, or a plugin's `$.ui.scroll`.
+       * Fires before a site's window moves: the person's wheel or scroll keys on
+       * a `Pane` body or the `AbovePrompt` band, at its edges too; `$.ui.scroll`.
        *
-       * `next(e)` moves the window to `e.offset`: `{}`. Rewrite with `next({
-       * ...e, offset })`, or answer `{ deny: reason }` without `next` to keep
-       * it. The person's window tracks the wheel and the chain settles it after.
+       * `next(e)` moves it to `e.offset` and draws: `{}`; `next({ ...e, offset
+       * })` elsewhere; no `next` (`{}` or `{ deny }`) leaves it undrawn, so a hook
+       * drawing its own rows under a header moves them by `e.by` and invalidates.
        *
        * @example
-       * on("ui.scroll", ($, e, next) => next({ ...e, offset: 0 }))
+       * on("ui.scroll", { requestId: "log" }, ($, e) => (scrollOwnRows(e.by), {}))
        */
       'ui.scroll': UiScrollInput;
+      /**
+       * Fires before a site's focus ring moves: the person's Tab, arrows or click
+       * in a `Pane` or the band; an `autoFocus` element taking it; `$.ui.focus`.
+       *
+       * `next(e)` lands it on `e.element` (absent: one of the engine's stops) and
+       * draws: `{}`; `next({ ...e, element })` on another of `e.plugin`'s; no
+       * `next` (`{}` or `{ deny }`) keeps it where it was, drawn as it was.
+       *
+       * @example
+       * on("ui.focus", { requestId: "list" }, ($, e, next) => (mark(e), next(e)))
+       */
+      'ui.focus': UiFocusInput;
       /**
        * Fires when the engine offers an agent type to the model, in the agent
        * listing and again at dispatch; `next(e)` resolves to `{ isOffered: true }`.
@@ -2889,6 +3250,10 @@ declare module 'claude-code' {
        */
       'ui.scroll': UiScrollResult;
       /**
+       * `{}` once the ring moved, or `{ deny }`.
+       */
+      'ui.focus': UiFocusResult;
+      /**
        * `{ isOffered }`.
        */
       'agent.offer': AgentOfferResult;
@@ -3042,6 +3407,7 @@ declare module 'claude-code' {
           render: <C extends RenderComponent>(input: RenderInput<C>) => Promise<RenderElement>;
           resolve: <E extends ResolveInput>(e: E) => Elements[E['surface']];
           scroll: (input: UiScrollArgs) => Promise<UiScrollResult>;
+          focus: (input: UiFocusArgs) => Promise<UiFocusResult>;
       };
   };
 
@@ -3378,6 +3744,15 @@ declare module 'claude-code' {
        * focus (`send`). Defaults to `submit`.
        */
       submitLabel?: string;
+      /**
+       * The site's focus ring starts here when the site takes the keyboard,
+       * instead of on nothing, as the DOM's `autofocus`: Enter acts on it at once.
+       *
+       * A pane opened with `focus`, or the person's focus chord or click, is the
+       * take. Of several in one site the first drawn wins; it raises `ui.focus`,
+       * origin this plugin. A ring the person has moved stays where it was put.
+       */
+      autoFocus?: true;
       /**
        * Runs on every change of the text, in the plugin's own environment: the
        * bottom of a `ui.input` chain of kind `change`.
@@ -4156,9 +4531,9 @@ declare module 'claude-code' {
        */
       'session.authorize': NoArgs;
       /**
-       * The argument of `$.session.usage()`.
+       * The argument of `$.session.usage({ breakdown, columns })`.
        */
-      'session.usage': NoArgs;
+      'session.usage': SessionUsageArgs;
       /**
        * The argument of `$.turn.abort({ turnId })`.
        */
@@ -4231,6 +4606,11 @@ declare module 'claude-code' {
        * raises it too, for the person (`person`) and an unload (`unload`).
        */
       'ui.close': PaneCloseInput;
+      /**
+       * The argument of `$.ui.blit({ requestId, key, cells })`; a hook above
+       * the painter may repaint the cells with `next`, or refuse with `{ deny }`.
+       */
+      'ui.blit': UiBlitArgs;
       /**
        * The argument of `$.fs.read(path)`.
        */
@@ -4391,6 +4771,7 @@ declare module 'claude-code' {
       'ui.invalidate': void;
       'ui.open': void;
       'ui.close': void;
+      'ui.blit': UiBlitResult;
       'fs.read': string;
       'fs.write': void;
       'fs.list': FsEntry[];
@@ -4482,15 +4863,19 @@ declare module 'claude-code' {
    */
   export type PaneCloseOrigin = {
       /**
-       * `plugin`, a plugin's `$.ui.close`; `person`, the person's close key;
-       * `unload`, the engine's own.
+       * `plugin`, a plugin's `$.ui.close`; `person`, the person's close mark or
+       * close key; `unload`, the engine's own.
        */
       kind: 'plugin' | 'person' | 'unload';
   };
 
   /**
-   * The argument of `$.ui.open`: which pane, its title, and whether the
-   * plugin asks the person's keyboard for it.
+   * The argument of `$.ui.open`: which pane, its title, whether it asks the
+   * person's keyboard, its dialog manners, and the rows it wants inline.
+   *
+   * An open answering the person's input (a command or prompt they entered, a
+   * press) is placed at any width; one the plugin makes on its own waits
+   * undrawn below 144 terminal columns, 110 once they asked for that id.
    */
   export type PaneOpenArgs = {
       /**
@@ -4514,6 +4899,32 @@ declare module 'claude-code' {
        * the keyboard.
        */
       focus?: true;
+      /**
+       * While the pane holds the keyboard, the key that hands it back (Escape)
+       * also closes it as the person's close does: `ui.close`, origin `person`.
+       *
+       * A hook may refuse that close and keep it open. Left out, Escape returns
+       * the keys to the prompt and the pane stays. Each open sets it anew, as it
+       * sets the title.
+       */
+      closeOnEscape?: true;
+      /**
+       * While the pane is on screen the surface holds its transient toasts (the
+       * notification line under the prompt) and shows them once it closes.
+       *
+       * As it does behind the engine's own side panel; pinned warnings still
+       * show. Left out, toasts show as they come. Each open sets it anew.
+       */
+      holdToasts?: true;
+      /**
+       * The body rows the pane's content wants while seated inline above the
+       * prompt: it opens that tall, up to what the layout spares, not a third.
+       *
+       * A request, not a grant: a size the person dragged or keyed the block
+       * to wins, this session's or a kept one, and the dock ignores it. A
+       * positive whole number; left out, a third. Each open sets it anew.
+       */
+      rows?: number;
   };
 
   /**
@@ -4754,7 +5165,7 @@ declare module 'claude-code' {
 
   /**
    * Whose element: the plugin whose hook drew it, stamped by the runtime as the
-   * tree leaves that hook; a Box's or Text's `group`, a Client's `client`.
+   * tree leaves it; a Box's or Text's `group`, a Client's or Raster's own.
    *
    * A Button's `press` names its plugin the same way, beside its handle. Two
    * plugins under one `hover.scope` string never share a group.
@@ -5419,6 +5830,43 @@ declare module 'claude-code' {
   };
 
   /**
+   * The props of `Raster`, the terminal surface's cell-grid leaf: a fixed box
+   * of cells, each a glyph, a foreground and a background, packed in `cells`.
+   *
+   * A leaf: no children, `hover` or `onPress` yet; repainted in place by
+   * `$.ui.blit`. Terminal only for now (elsewhere a fragment); its palette
+   * paints 1024 distinct color pairs at once and the rest as their nearest.
+   */
+  export type RasterProps = {
+      /**
+       * The element's address within the drawing: what `$.ui.blit` names to
+       * repaint it, unique among the Rasters of one tree.
+       */
+      key: string;
+      /**
+       * How many terminal columns wide, 1 to 512; the site clips what its body
+       * cannot show.
+       */
+      columns: number;
+      /**
+       * How many terminal rows tall, 1 to 256.
+       */
+      rows: number;
+      /**
+       * Every cell, row-major: standard padded base64 of `columns * rows`
+       * little-endian u32 triplets `[codePoint, foreground, background]`.
+       *
+       * A code point is one printable width-1 BMP character (blocks, box drawing,
+       * braille too), or the tree is refused naming the cell's index; a color is
+       * `0x00RRGGBB`, or `0x01000000` (bit 24 alone) for the terminal's default.
+       *
+       * @example const words = Uint32Array.of(0x2588, 0xff8800, 0x01000000)
+       * const cells = new Uint8Array(words.buffer).toBase64() // one orange cell
+       */
+      cells: string;
+  };
+
+  /**
    * The hooks module's entry: `export function register(on, options)`. `on`
    * registers hooks; `options` is the plugin's configuration (PluginOptions).
    *
@@ -5465,7 +5913,7 @@ declare module 'claude-code' {
    * authorises an action; a plugin adds context with `$.ui.notice`. `Pane` is
    * the one component whose instances a plugin opens (`$.ui.open`).
    */
-  export type RenderComponent = 'AskUserQuestion' | 'UserMessage' | 'AssistantMessage' | 'ToolUse' | 'ToolResult' | 'ToolGroup' | 'Spinner' | 'TurnDuration' | 'InfoNotice' | 'SessionMode' | 'PromptHint' | 'AbovePrompt' | 'Pane';
+  export type RenderComponent = 'AskUserQuestion' | 'UserMessage' | 'AssistantMessage' | 'ToolUse' | 'ToolResult' | 'ToolGroup' | 'CommandOutput' | 'Spinner' | 'TurnDuration' | 'InfoNotice' | 'SessionMode' | 'PromptHint' | 'AbovePrompt' | 'Pane';
 
   /**
    * What a render hook returns, and what `next(e)` resolves to: a plain-data
@@ -5505,6 +5953,15 @@ declare module 'claude-code' {
            */
           hotkey?: string;
           /**
+           * An engine keybinding action (`"app:cycleDiffBase"`) whose chord
+           * presses the Button from the prompt; an unknown name is refused.
+           *
+           * Chords, or a modified key Global or an active context binds, on
+           * the terminal while mounted, no dialog up, no engine handler of it
+           * mounted; a pane's over the band's over another's, the last drawn.
+           */
+          action?: string;
+          /**
            * Drawn without chrome: the hotkey in the accent color, a colon,
            * then the label (`1: Yes`), as a survey's row reads.
            *
@@ -5513,6 +5970,16 @@ declare module 'claude-code' {
            * defaults to the label.
            */
           plain?: true;
+          /**
+           * The label dim at rest, as `Text`'s `dimColor`, and at full strength
+           * under the pointer or the focus; absent draws as false.
+           */
+          dimColor?: TextProps['dimColor'];
+          /**
+           * The site's ring starts on this element when the site takes the
+           * keyboard; the first drawn of several. Absent draws as before.
+           */
+          autoFocus?: true;
       };
       /**
        * Where the handler lives: the plugin whose hook drew the element, and
@@ -5561,6 +6028,11 @@ declare module 'claude-code' {
            * What Enter does, drawn beside the field while it has focus.
            */
           submitLabel?: string;
+          /**
+           * The site's ring starts on this element when the site takes the
+           * keyboard; the first drawn of several. Absent draws as before.
+           */
+          autoFocus?: true;
       };
       /**
        * Where the handlers live: the plugin whose hook drew the element, and
@@ -5602,6 +6074,11 @@ declare module 'claude-code' {
            * Which option is selected when drawn.
            */
           value?: string;
+          /**
+           * The site's ring starts on this element when the site takes the
+           * keyboard; the first drawn of several. Absent draws as before.
+           */
+          autoFocus?: true;
       };
       /**
        * Where the handler lives: the plugin whose hook drew the element, and
@@ -5668,6 +6145,25 @@ declare module 'claude-code' {
        */
       type: 'Svg';
       props: SvgProps;
+      children?: undefined;
+  } | {
+      /**
+       * A grid of terminal cells, the terminal surface's alone: each cell a
+       * glyph, a foreground and a background, packed in `props.cells`.
+       *
+       * A leaf, one node however many cells; hooks above wrap or replace it
+       * whole. A mounted one is repainted in place by its plugin's
+       * `$.ui.blit`. On a surface whose table lacks it the tree is refused.
+       */
+      type: 'Raster';
+      props: RasterProps;
+      /**
+       * Whose Raster: the plugin whose hook drew the element, stamped by the
+       * runtime as the tree leaves it; the one plugin whose blit reaches it.
+       */
+      raster: {
+          plugin: string;
+      };
       children?: undefined;
   } | {
       /**
@@ -5899,6 +6395,39 @@ declare module 'claude-code' {
           isExpanded: boolean;
       };
       /**
+       * The output row a slash command printed in the transcript, under its echo
+       * (`/cost`'s lines, the `text` a `command.run` hook answered).
+       *
+       * What the run resolved as text, a `local` command's or a plugin's alike. A
+       * rewrite of `text` draws there and the stored row keeps what the model
+       * reads; a hook's own tree draws in the row's place, the transcript's width.
+       */
+      CommandOutput: {
+          /**
+           * Which one printed the row, as `command.run` named it (no slash); a
+           * hook on its own command matches by it.
+           *
+           * Read-only: a rewrite carries it on as received; one that changes or
+           * drops it is refused and the engine draws its own row.
+           */
+          command: string;
+          /**
+           * The arguments the run had, as the echo above the row shows them
+           * (`***` for a command that marks its arguments sensitive). Read-only.
+           */
+          args: string;
+          /**
+           * The row's text: what the command printed, or the `text` a hook
+           * answered under its plugin's name; markdown, as the row draws it.
+           */
+          text: string;
+          /**
+           * True when the row is the run's error line (a command that threw),
+           * which draws in the error colour and not dim. Read-only.
+           */
+          isErrored: boolean;
+      };
+      /**
        * The line that animates while a turn runs (`Sauteing... (12s, 300
        * tokens)`). Terminal only: the Code session renderer draws its own.
        */
@@ -6037,18 +6566,19 @@ declare module 'claude-code' {
       };
       /**
        * The framed region a plugin opened with `$.ui.open({ id })`: one instance
-       * per id (`requestId`), its body the hook's tree under the engine's header.
+       * per id (`requestId`), its body the hook's tree, one shown, the rest tabs.
        *
-       * Placement, order and size are the surface's (docked beside the transcript
-       * in fullscreen, above the prompt otherwise; one shown, the rest tabs); the
-       * keyboard is the person's (ctrl+x tab, Esc); a tall tree scrolls.
+       * Placed by the surface (docked in fullscreen, else above the prompt) and
+       * keyed by the person (ctrl+x tab, Esc), who closes it from the engine's mark
+       * or ctrl+x x: `ui.close` with origin `person`, which a hook may refuse.
        */
       Pane: {
           /**
            * Its tab's label while more than one pane is open (with one, the engine
            * draws no title): the `title` it was opened with, or its id.
            *
-           * Read-only here; another `$.ui.open` (or a hook on `ui.open`) retitles.
+           * A click on a tab, or Tab onto it and Enter, shows that pane. Read-only
+           * here; another `$.ui.open` (or a hook on `ui.open`) retitles.
            */
           title: string;
           /**
@@ -6218,6 +6748,15 @@ declare module 'claude-code' {
        */
       value?: string;
       /**
+       * The site's focus ring starts here when the site takes the keyboard,
+       * instead of on nothing, as the DOM's `autofocus`: Enter acts on it at once.
+       *
+       * A pane opened with `focus`, or the person's focus chord or click, is the
+       * take. Of several in one site the first drawn wins; it raises `ui.focus`,
+       * origin this plugin. A ring the person has moved stays where it was put.
+       */
+      autoFocus?: true;
+      /**
        * Runs on a pick with the option's value, in the plugin's own environment:
        * the bottom of a `ui.select` chain. No model turn unless it asks one.
        */
@@ -6374,11 +6913,93 @@ declare module 'claude-code' {
   export type SessionCompactTrigger = 'manual' | 'auto' | 'plugin' | 'precompute';
 
   /**
-   * The live context window as the status line reads it: the last API
-   * response's input side against the model's window.
+   * The context window broken down as /context breaks it down: the rows, the
+   * grid and the lists beneath it, in the SDK's `get_context_usage` shape.
    *
-   * `tokens` and `percent` are absent until the first response of the live
-   * window: a fresh session, or one just compacted, until its next response.
+   * Less that reply's internal-build sections. Token counts are the engine's
+   * estimates as numbers, never formatted: a `full` breakdown counts with the
+   * token-count API where it can, a `summary` one estimates throughout.
+   */
+  export type SessionContextBreakdown = {
+      /**
+       * One row per category, the free space and the compaction buffer among
+       * them; `kind` says which is which.
+       */
+      categories: ContextCategory[];
+      /**
+       * Tokens in use, unclamped: past `rawMaxTokens` when over the window.
+       */
+      totalTokens: number;
+      /**
+       * The window measured against, the same figure as `rawMaxTokens`.
+       */
+      maxTokens: number;
+      /**
+       * The window measured against, in tokens: the model's limit, or a smaller
+       * compaction window (`autocompactSource` says which).
+       */
+      rawMaxTokens: number;
+      /**
+       * How that window was settled (ContextWindowSource); the SDK's reply
+       * carries it under this name too, outside its typed schema.
+       */
+      autocompactSource: ContextWindowSource;
+      /**
+       * `totalTokens` over `rawMaxTokens` as a whole percentage, 0 to 100 and
+       * past it when over.
+       */
+      percentage: number;
+      /**
+       * The grid, row by row: 10 by 10, 20 by 10 for a window of a million or
+       * more, 5 wide when asked for under 80 `columns`.
+       */
+      gridRows: ContextGridSquare[][];
+      /**
+       * Which model the breakdown was computed for, as `/model` shows it.
+       */
+      model: string;
+      /**
+       * Each memory file in the context, with its path and tokens.
+       */
+      memoryFiles: ContextMemoryFile[];
+      /**
+       * Each MCP tool's schema, with its server and tokens.
+       */
+      mcpTools: ContextMcpTool[];
+      /**
+       * The custom agents the Agent tool describes, each with its tokens.
+       */
+      agents: ContextAgent[];
+      /**
+       * The slash-command listing, counted; absent when the session lists none.
+       */
+      slashCommands?: ContextSlashCommands;
+      /**
+       * The skill listing, counted, with one entry per skill; absent when the
+       * session lists none.
+       */
+      skills?: ContextSkills;
+      /**
+       * The token count at which auto-compaction runs; absent when it is off.
+       */
+      autoCompactThreshold?: number;
+      /**
+       * Whether auto-compaction is on for the session.
+       */
+      isAutoCompactEnabled: boolean;
+      /**
+       * The last response's own token counts, or null before one came back.
+       */
+      apiUsage: ContextApiUsage | null;
+  };
+
+  /**
+   * The live context window as the status line reads it, and by category as
+   * /context breaks it down when the call asked (`{ breakdown }`).
+   *
+   * `tokens` and `percent` are the last API response's input side against the
+   * model's window, absent until the first response of the live window: a
+   * fresh session, or one just compacted, until its next response.
    */
   export type SessionContextUsage = {
       /**
@@ -6396,6 +7017,15 @@ declare module 'claude-code' {
        * line's `used_percentage`).
        */
       percent?: number;
+      /**
+       * The window by category, as /context breaks it down: present only when
+       * the call passed `breakdown`, and only with a session bound.
+       *
+       * It measures against the compaction window (`rawMaxTokens`), which may be
+       * smaller than `window`, and estimates every category, so its
+       * `totalTokens` need not equal `tokens`.
+       */
+      breakdown?: SessionContextBreakdown;
   };
 
   /**
@@ -6716,6 +7346,29 @@ declare module 'claude-code' {
        * the host keeps no cost ledger (the CLI always has one).
        */
       cost?: SessionCost;
+  };
+
+  /**
+   * What `$.session.usage(args)` takes: nothing for the status line's figures
+   * alone; `breakdown` to have the window broken down as /context breaks it.
+   */
+  export type SessionUsageArgs = {
+      /**
+       * Asks for `context.breakdown` and says how it is counted
+       * (ContextBreakdownDetail); absent, none is computed and the call is free.
+       *
+       * `full` sends one token-count request per tool and memory file, as
+       * /context does; `summary` estimates locally and sends none.
+       */
+      breakdown?: ContextBreakdownDetail;
+      /**
+       * The width the breakdown's grid will be drawn in, in terminal columns;
+       * absent, the full-width grid. Read only with `breakdown`.
+       *
+       * Under 80 the grid is the narrow one /context draws there, 5 wide. A thin
+       * client's breakdown is the remote workspace's, whose grid ignores this.
+       */
+      columns?: number;
   };
 
   /**
@@ -8025,6 +8678,162 @@ declare module 'claude-code' {
   };
 
   /**
+   * What a plugin's `$.ui.blit(args)` takes: which of its mounted Rasters to
+   * repaint, in which of its sites, and the cells to paint it with.
+   *
+   * The Raster is one this plugin's own `ui.render` hook drew, still mounted;
+   * `columns` and `rows`, when given, must be the mounted size (a resize is a
+   * redraw, `$.ui.invalidate("ui.render")`, not a blit).
+   */
+  export type UiBlitArgs = {
+      /**
+       * The site the Raster is drawn in, by the `requestId` this plugin draws
+       * it under: one of its panes' ids, a tool row's `tool_use_id`, the band's.
+       */
+      requestId: string;
+      /**
+       * The Raster's `key` in that drawing.
+       */
+      key: string;
+      /**
+       * The new cells, encoded as the element's `cells` are (RasterProps), for
+       * the mounted `columns * rows`.
+       */
+      cells: string;
+      /**
+       * The width the cells are laid out for; refused unless it is the mounted
+       * Raster's. Absent, the mounted width.
+       */
+      columns?: number;
+      /**
+       * The height the cells are laid out for; refused unless it is the mounted
+       * Raster's. Absent, the mounted height.
+       */
+      rows?: number;
+  };
+
+  /**
+   * What `$.ui.blit` resolves to and what a `ui.blit` hook's `{ value }`
+   * holds: `{}` once the cells are the Raster's next frame, or why not.
+   */
+  export type UiBlitResult = {
+      /**
+       * Absent when the cells were taken; else why not: nothing of this plugin's
+       * is mounted there, the size is not the mounted one, the cells are bad.
+       *
+       * Another plugin's Raster under the same site and key reads as not this
+       * plugin's; a cell that does not decode is named by its index.
+       */
+      deny?: string;
+  };
+
+  /**
+   * What a plugin's `$.ui.focus(args)` takes: one of its own elements, by the
+   * `key` it drew it under, in one of its sites that holds the keyboard now.
+   *
+   * The engine resolves it to that site's ring and raises `ui.focus` under
+   * the plugin's origin; the keyboard is the person's to give, so a site that
+   * does not hold it, or holds it on another plugin's element, is `{ deny }`.
+   */
+  export type UiFocusArgs = {
+      /**
+       * The site, by the `requestId` this plugin draws it under: one of its
+       * panes' ids, or the band's.
+       */
+      requestId: string;
+      /**
+       * The element's `key`: a `Button`, `Input` or `Select` this plugin drew in
+       * that site; of several under one key, the first in document order.
+       */
+      key: string;
+  };
+
+  /**
+   * The render components whose site keeps a focus ring: a pane's body and
+   * the band above the prompt, each a ring over the elements hooks drew there.
+   */
+  export type UiFocusComponent = 'Pane' | 'AbovePrompt';
+
+  /**
+   * The input of `ui.focus`: a site's focus ring about to move onto one of the
+   * elements a hook drew in it (a `Button`, `Input` or `Select`), or off them.
+   *
+   * Every key but `element` is the engine's word, pinned: `next(e)` passes
+   * them on, a rewrite that leaves one out keeps it, one that changes it fails
+   * the hook. `element` is the hook's to rewrite; the ring has not moved yet.
+   */
+  export type UiFocusInput = {
+      /**
+       * Which site: a `Pane` body or the `AbovePrompt` band.
+       */
+      component: UiFocusComponent;
+      /**
+       * The instance the `ui.render` hook drawing the site sees: the pane's id,
+       * or the band's one id.
+       */
+      requestId: string;
+      /**
+       * Whose `ui.render` hook drew the element taking the ring; absent with
+       * `element`. Read-only.
+       */
+      plugin?: string;
+      /**
+       * The `key` of the element taking the ring, as `ui.press` names it; absent
+       * for one of the engine's own stops (a pane's close mark or another's tab).
+       *
+       * `next({ ...e, element })` lands it on another element `plugin` drew in
+       * the site instead; one not drawn there is core's `{ deny }`.
+       */
+      element?: string;
+      /**
+       * Who moves it (UiFocusOrigin), set by the engine where the move starts.
+       */
+      origin: UiFocusOrigin;
+  };
+
+  /**
+   * Who moves the ring at `ui.focus`, as the engine stamps it where the move
+   * starts; a closed set a matcher narrows on.
+   *
+   * `next(e)` passes it on as received; no hook sets one.
+   */
+  export type UiFocusOrigin = {
+      /**
+       * The person, by Tab, the arrows or a click while the site holds the
+       * keyboard.
+       */
+      kind: 'person';
+  } | {
+      /**
+       * A plugin's `$.ui.focus`, or its `autoFocus` element taking the ring
+       * as the site takes the keyboard.
+       */
+      kind: 'plugin';
+      /**
+       * The focusing plugin's name.
+       */
+      name: string;
+  };
+
+  /**
+   * What a `ui.focus` hook returns, what `next(e)` resolves to, and what
+   * `$.ui.focus` hands back: `{}` once the ring moved, or why it did not.
+   *
+   * As `ui.scroll` spells it.
+   */
+  export type UiFocusResult = {
+      /**
+       * Absent when the ring is where the chain left it; else why nothing
+       * moved.
+       *
+       * A hook kept the ring (no `next`); the site is not this plugin's, does
+       * not hold the keyboard, or another plugin's element holds it; no element
+       * of `plugin` is drawn under `element`; another move landed first.
+       */
+      deny?: string;
+  };
+
+  /**
    * The argument of `ui.input`: a change of, or a submit from, an `Input` a
    * render hook drew. Flat and frozen like every event's.
    *
@@ -8233,12 +9042,12 @@ declare module 'claude-code' {
   export type UiScrollComponent = 'Pane' | 'AbovePrompt';
 
   /**
-   * The input of `ui.scroll`: a site's window about to move over the tree a
+   * The input of `ui.scroll`: a site's window asked to move over the tree a
    * hook drew in it (a pane's body, the band above the prompt).
    *
-   * `component`, `requestId`, `bodyRows` and `origin` are the engine's word,
-   * pinned: `next(e)` passes them on, a rewrite that leaves one out keeps it,
-   * one that changes it fails the hook. `offset` is the hook's to rewrite.
+   * Every key but `offset` is the engine's word, pinned: `next(e)` passes
+   * them on, a rewrite that leaves one out keeps it, one that changes or adds
+   * one fails the hook. `offset` is the hook's to rewrite; nothing moved yet.
    */
   export type UiScrollInput = {
       /**
@@ -8251,22 +9060,45 @@ declare module 'claude-code' {
        */
       requestId: string;
       /**
-       * The first row of the tree the window is to show, 0 at the top: where
-       * the person put it, or where a plugin's `$.ui.scroll` resolved to.
+       * The first row the window is to show, 0 at the top: the row it shows
+       * now plus `by`, clamped to the tree, or where `$.ui.scroll` resolved.
        *
        * `next({ ...e, offset })` moves it elsewhere (a clamp); one past the
-       * tree's end lands at the end.
+       * tree's end lands at the end. Nothing has moved when a hook reads it.
        */
       offset: number;
+      /**
+       * The rows the move asks for, signed, negative toward the top; what the
+       * DOM's `scrollBy` takes. Read-only.
+       *
+       * The person's: a wheel tick `-1` or `1` at rest, more as ticks crowd or
+       * summed in flight; an arrow a row while the engine has rows to scroll, a
+       * page key `bodyRows`, Home and End `contentRows`. A plugin's: its distance.
+       */
+      by: number;
       /**
        * How many rows of the tree the window shows at once, as drawn now.
        * Read-only.
        */
       bodyRows: number;
       /**
+       * How many rows the tree has, as drawn now: the window's last offset is
+       * `contentRows - bodyRows`, none when the tree fits. Read-only.
+       */
+      contentRows: number;
+      /**
        * Who moves it (UiScrollOrigin), set by the engine where the move starts.
        */
       origin: UiScrollOrigin;
+      /**
+       * The body cell the person's wheel or trackpad was over (UiScrollPointer);
+       * absent for the scroll keys and for `$.ui.scroll`. Read-only.
+       *
+       * Moves summed while a dispatch was in flight carry the latest one's. A
+       * hook pinning a list over rows it scrolls itself tells a tick over the
+       * list (`row` among its list's rows) from one over the body.
+       */
+      pointer?: UiScrollPointer;
   };
 
   /**
@@ -8293,6 +9125,30 @@ declare module 'claude-code' {
   };
 
   /**
+   * The cell the pointer was over when the person's wheel raised `ui.scroll`,
+   * in the site's body: the box its `ui.render` hook draws into, as painted.
+   *
+   * The DOM's `clientY - body.top` in cells, the window's offset not added: a
+   * hook drawing its own window reads `row` as its tree's row, one the engine
+   * scrolls adds the `scroll.offset` it drew with. The frame lies outside.
+   */
+  export type UiScrollPointer = {
+      /**
+       * 0 at the body's left edge, as `bodyColumns` counts them; negative, or
+       * `bodyColumns` and past, over an inline pane's side borders.
+       */
+      column: number;
+      /**
+       * 0 at the body's first showing row, as `bodyRows` counts them.
+       *
+       * The tree's row is `scroll.offset + row` under the engine's window, and
+       * `row` itself under a hook's own (offset 0); negative over a pane's top
+       * border or tab row, `bodyRows` or more over its bottom border.
+       */
+      row: number;
+  };
+
+  /**
    * What a `ui.scroll` hook returns, what `next(e)` resolves to, and what
    * `$.ui.scroll` hands back: `{}` once the window moved, or why it did not.
    */
@@ -8301,9 +9157,9 @@ declare module 'claude-code' {
        * Absent when the window is where the chain left it; else why nothing
        * moved, as `tool.call` and `config.set` spell a refusal.
        *
-       * A hook kept the window (answering without `next`), the target is not
-       * this plugin's to scroll, or a transcript row was asked for outside the
-       * person's own input (`not person-initiated`) or where none scrolls.
+       * A hook kept the window (no `next`); the target is not this plugin's;
+       * another move landed first (`the window moved meanwhile`); a transcript
+       * row is not the person's ask (`not person-initiated`) or none scrolls.
        */
       deny?: string;
   };

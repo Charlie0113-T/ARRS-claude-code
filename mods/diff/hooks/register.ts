@@ -1,13 +1,21 @@
-import type { On, ResultOf, SessionMessage, Timer } from 'claude-code'
+import type {
+  On,
+  PaneOpenArgs,
+  ResultOf,
+  SessionMessage,
+  Timer,
+} from 'claude-code'
 
 import Ask from './ask'
 import Backend from './backend'
 import { COMMAND_SPEC } from './command-spec'
+import { drawnFilesOf } from './drawn-files-of'
 import { entryKindsOf } from './entry-kinds-of'
 import type Git from './git'
 import type { Host } from './host'
 import { isOnPaneSurface } from './is-on-pane-surface'
 import Limits from './limits'
+import { mapLimited } from './map-limited'
 import { messageOf } from './message-of'
 import { mtimeOf } from './mtime-of'
 import Names from './names'
@@ -33,16 +41,19 @@ export function register(on: On) {
   let probing: Promise<boolean> | null = null
   let sessionStartMs = 0
   let isPaneOpen = false
+  let dialogRows: number | null = null
   let hasAutoOpened = false
   let columns: number | null = null
   let shownSessionId: string | null = null
-  let wasDrawnSinceProbe = false
   let armed: Ask.ArmedAsk | null = null
   let carrying: Ask.ArmedAsk | null = null
   let isRefreshing = false
   let isRefreshQueued = false
   let generation = 0
-  let bodyKey: string | null = null
+  let bodyStamp: string | null = null
+  let bodyBase: string | null = null
+
+  const bodyLoads = new Map<string, Promise<Git.FileHunks | null>>()
 
   const polled = { toplevel: '', headKey: '' }
 
@@ -137,7 +148,31 @@ export function register(on: On) {
     return true
   }
 
+  function dialogPane(): PaneOpenArgs {
+    return {
+      id: Names.PANE_ID,
+      title: Names.PANE_TITLE,
+      holdToasts: true,
+      closeOnEscape: true,
+      rows: Views.dialogRowsOf(model),
+    }
+  }
+
+  function fitDialog(engine: Host) {
+    const rows = Views.dialogRowsOf(model)
+
+    const isStale =
+      isPaneOpen && model.isFullscreen === false && rows !== dialogRows
+
+    if (isStale) {
+      dialogRows = rows
+      void engine.openPane(dialogPane()).catch(() => undefined)
+    }
+  }
+
   function redraw(engine: Host) {
+    fitDialog(engine)
+
     if (timers.has('redraw')) {
       return
     }
@@ -151,49 +186,70 @@ export function register(on: On) {
     )
   }
 
-  const selectedOf = (): Git.FileStat | null =>
-    PaneState.selectionOf(
-      PaneState.listedOf(
-        PaneState.partitionOf(
-          model.data?.files ?? [],
-          model.isNoiseShown ? 'shown' : 'hidden',
-        ),
-        model.isPreSessionShown ? 'shown' : 'hidden',
-      ),
-      model.selectedPath,
-    )
-
-  async function loadBody(engine: Host): Promise<boolean> {
+  async function loadBodies(engine: Host): Promise<boolean> {
     const { data } = model
-    const selected = selectedOf()
+    const pinned = backend
 
-    if (!data || !selected || !backend) {
-      bodyKey = null
-      model = { ...model, body: null, bodyState: 'idle' }
+    if (!data || !pinned) {
+      bodyStamp = null
+      bodyBase = null
+      bodyLoads.clear()
+      model = { ...model, bodies: PaneState.NO_BODIES }
 
       return false
     }
 
-    const key = `${generation}|${data.baseRef}|${selected.path}`
+    const stamp = bodyStampOf(data)
+    const isNewBase = data.baseRef !== bodyBase
 
-    if (key === bodyKey) {
-      return false
+    if (stamp !== bodyStamp) {
+      bodyStamp = stamp
+      bodyLoads.clear()
     }
 
-    bodyKey = key
-    model = { ...model, body: null, bodyState: 'loading' }
-    redraw(engine)
-
-    const body = await backend.fetchFileHunks(data, selected)
-
-    if (bodyKey !== key) {
-      return body === null
+    if (isNewBase) {
+      bodyBase = data.baseRef
+      model = { ...model, bodies: PaneState.NO_BODIES }
+      redraw(engine)
     }
 
-    model = { ...model, body, bodyState: body ? 'ready' : 'failed' }
-    redraw(engine)
+    return fetchBodies(engine, pinned, data)
+  }
 
-    return body === null
+  const bodyStampOf = (data: Git.DiffData) => `${generation}|${data.baseRef}`
+
+  async function fetchBodies(
+    engine: Host,
+    pinned: Backend.Backend,
+    data: Git.DiffData,
+  ): Promise<boolean> {
+    const stamp = bodyStampOf(data)
+
+    function loadOf(file: Git.FileStat): Promise<Git.FileHunks | null> {
+      const load = pinned.fetchFileHunks(data, file)
+      bodyLoads.set(file.path, load)
+
+      return load.then(body => {
+        if (bodyStamp === stamp) {
+          model = {
+            ...model,
+            bodies: new Map(model.bodies).set(file.path, body),
+          }
+
+          redraw(engine)
+        }
+
+        return body
+      })
+    }
+
+    return (
+      await mapLimited(
+        drawnFilesOf(model).filter(file => !bodyLoads.has(file.path)),
+        Limits.BODY_FETCH_CONCURRENCY,
+        loadOf,
+      )
+    ).includes(null)
   }
 
   function startPoll(engine: Host, pinned: Backend.Backend) {
@@ -274,7 +330,7 @@ export function register(on: On) {
           break
       }
 
-      const hasHunksFailed = await loadBody(engine)
+      const hasHunksFailed = await loadBodies(engine)
 
       if (outcome.kind === 'data') {
         record.mark(
@@ -318,9 +374,23 @@ export function register(on: On) {
     engine: Host,
     trigger: (typeof Record.SHOWN_TRIGGERS)[number],
   ): Promise<void> {
-    const pane = { id: Names.PANE_ID, title: Names.PANE_TITLE }
-    const isManual = trigger === 'manual'
-    await engine.openPane(isManual ? { ...pane, ...Names.FOCUSED_PANE } : pane)
+    const isDialog = model.isFullscreen === false
+
+    model = {
+      ...model,
+      selectedPath: null,
+      dialogView: 'list',
+      place: { ...model.place, top: 0, listStart: 0 },
+    }
+
+    dialogRows = isDialog ? Views.dialogRowsOf(model) : null
+
+    await engine.openPane(
+      isDialog
+        ? { ...dialogPane(), focus: true }
+        : { id: Names.PANE_ID, title: Names.PANE_TITLE, holdToasts: true },
+    )
+
     isPaneOpen = true
 
     const sessionId = await engine.sessionId().catch(() => null)
@@ -345,14 +415,6 @@ export function register(on: On) {
     })
   }
 
-  async function wasDrawnWhenProbed(engine: Host): Promise<boolean> {
-    wasDrawnSinceProbe = false
-    engine.invalidate()
-    await engine.sleep(Limits.OPEN_PROBE_MS)
-
-    return wasDrawnSinceProbe
-  }
-
   async function openOnFirstEdit(engine: Host): Promise<void> {
     const isTaken = () => isPaneOpen || hasAutoOpened
 
@@ -372,6 +434,7 @@ export function register(on: On) {
 
     const isEligible =
       preference !== false &&
+      model.isFullscreen !== false &&
       columns !== null &&
       columns >= floor &&
       backend !== null
@@ -392,29 +455,43 @@ export function register(on: On) {
 
   const actionsOf = (engine: Host): Views.PaneActions => ({
     selectFile: path => {
-      model = { ...model, selectedPath: path }
-      void loadBody(engine)
+      const isDocked = model.placement === 'dock'
+
+      model = {
+        ...model,
+        selectedPath: path,
+        dialogView: isDocked ? model.dialogView : 'detail',
+        place: isDocked ? Views.placeAtFile(model, path) : model.place,
+      }
+
+      redraw(engine)
+    },
+    scrollList: delta => {
+      model = { ...model, place: Views.listScrolledBy(model, delta) }
       redraw(engine)
     },
     toggleNoise: () => {
       model = { ...model, isNoiseShown: !model.isNoiseShown }
-      void loadBody(engine)
+      void loadBodies(engine)
       redraw(engine)
     },
     togglePreSession: () => {
       model = { ...model, isPreSessionShown: !model.isPreSessionShown }
-      void loadBody(engine)
+      void loadBodies(engine)
       redraw(engine)
     },
-    chooseBase: value => {
-      const mode = PaneState.baseModeOf(value)
+    cycleBase: () => {
+      const { baseModes, requestedMode } = model
 
-      if (!mode || mode === model.requestedMode) {
+      const mode =
+        baseModes[(baseModes.indexOf(requestedMode) + 1) % baseModes.length] ??
+        requestedMode
+
+      if (mode === requestedMode) {
         return
       }
 
-      bodyKey = null
-      model = { ...model, requestedMode: mode, body: null, bodyState: 'idle' }
+      model = { ...model, requestedMode: mode }
 
       Record.recorderOf(engine).mark(Record.FEATURES.baseSwitch, {
         kind: 'ok',
@@ -440,8 +517,7 @@ export function register(on: On) {
         ? { kind: 'turn', index }
         : { kind: 'current' }
 
-      model = { ...model, source, selectedPath: null }
-      void loadBody(engine)
+      model = { ...model, source, selectedPath: null, dialogView: 'list' }
       redraw(engine)
     },
     toggleAsk: path => {
@@ -454,12 +530,6 @@ export function register(on: On) {
 
       arm(engine, path)
     },
-    close: () => {
-      void closePane(engine)
-        .then(() => markTabSwitch(engine, 'convo'))
-        .then(() => engine.storeSet(Names.STORE_OPEN_KEY, false))
-        .catch(() => undefined)
-    },
   })
 
   function arm(engine: Host, path: string) {
@@ -467,7 +537,7 @@ export function register(on: On) {
       path,
       PaneState.pickedTurnOf(model)?.files.find(file => file.path === path)
         ?.hunks ??
-        model.body?.hunks ??
+        model.bodies.get(path)?.hunks ??
         [],
     )
 
@@ -505,7 +575,6 @@ export function register(on: On) {
       now: () => $.clock.now(),
       after: (ms, fn) => $.clock.after(ms, fn),
       every: (ms, fn) => $.clock.every(ms, fn),
-      sleep: ms => $.clock.sleep(ms),
       run: (argv, init) => $.process.run(argv, init),
       stat: path => $.fs.stat(path),
       listDir: path => $.fs.list(path),
@@ -542,9 +611,20 @@ export function register(on: On) {
 
     const { Box, Text, Button, Select, Code } = await $.ui.resolve(e)
 
-    wasDrawnSinceProbe = true
     columns = e.viewport?.columns ?? columns
-    model = { ...model, isFocused: e.props.isFocused }
+
+    model = {
+      ...model,
+      placement: e.props.placement,
+      place: {
+        ...model.place,
+        columns: Math.max(
+          1,
+          e.props.bodyColumns - Limits.PANE_RIGHT_PAD_COLUMNS,
+        ),
+        rows: e.props.scroll.bodyRows,
+      },
+    }
 
     return Views.paneView(
       {
@@ -554,7 +634,7 @@ export function register(on: On) {
         rows: e.props.scroll.bodyRows,
       },
       model,
-      e.props.placement,
+      { placement: e.props.placement, terminalColumns: columns },
     )
   })
 
@@ -573,10 +653,14 @@ export function register(on: On) {
       }
     }
 
+    const { isFullscreen } = e.presentation
+
+    columns = e.presentation.columns
+    model = { ...model, isFullscreen }
+
     const toggle = PaneToggle.paneToggleOf({
-      isBelievedOpen: isPaneOpen,
-      wasDrawnWhenProbed: isPaneOpen && (await wasDrawnWhenProbed(host)),
-      columns,
+      isOpen: isPaneOpen,
+      columns: isFullscreen ? columns : null,
     })
 
     if (toggle === 'too-narrow') {
@@ -585,8 +669,98 @@ export function register(on: On) {
 
     const isOpening = toggle === 'open'
     await (isOpening ? openPane(host, 'manual') : closePane(host))
+
+    if (!isFullscreen) {
+      return isOpening ? {} : { text: Names.DIALOG_DISMISSED_TEXT }
+    }
+
     markTabSwitch(host, isOpening ? 'diff' : 'convo')
     await host.storeSet(Names.STORE_OPEN_KEY, isOpening).catch(() => undefined)
+
+    return {
+      text: isOpening ? Names.PANEL_SHOWN_TEXT : Names.PANEL_HIDDEN_TEXT,
+    }
+  })
+
+  on('ui.close', { id: Names.PANE_ID }, async ($, e, next) => {
+    const isBack =
+      e.origin.kind === 'person' &&
+      model.placement === 'inline' &&
+      model.dialogView === 'detail'
+
+    if (isBack && host) {
+      model = { ...model, dialogView: 'list' }
+      redraw(host)
+
+      dialogRows = Views.dialogRowsOf(model)
+
+      void host
+        .openPane({ ...dialogPane(), focus: true })
+        .catch(() => undefined)
+
+      return { deny: 'back to the file list' }
+    }
+
+    const result = await next(e)
+    const isClosed = result.deny === undefined
+    const isPersons = isClosed && e.origin.kind === 'person'
+
+    if (isClosed) {
+      isPaneOpen = false
+    }
+
+    const isDialog = model.isFullscreen === false
+
+    if (isPersons && host && isDialog) {
+      host.uiLog(Names.DIALOG_DISMISSED_TEXT)
+    }
+
+    if (isPersons && host && !isDialog) {
+      markTabSwitch(host, 'convo')
+      await host.storeSet(Names.STORE_OPEN_KEY, false).catch(() => undefined)
+    }
+
+    return result
+  })
+
+  on('ui.focus', { plugin: Names.PLUGIN_NAME }, ($, e, next) => {
+    const isListed =
+      model.placement === 'inline' && model.dialogView === 'list' && host
+
+    const focus = isListed ? Views.dialogFocusOf(model, e.element) : null
+
+    if (focus === 'stay') {
+      return {}
+    }
+
+    if (!focus || !host) {
+      return next(e)
+    }
+
+    model = { ...model, selectedPath: focus.selectedPath }
+    fitDialog(host)
+    host.invalidate()
+
+    return next({ ...e, element: focus.landing })
+  })
+
+  on('ui.scroll', { requestId: Names.PANE_ID }, ($, e, next) => {
+    const isOwnBody = e.origin.kind === 'person' && model.placement === 'dock'
+
+    if (!isOwnBody || !host) {
+      return next(e)
+    }
+
+    const isOverList = Views.isWheelOverList(model, e)
+
+    model = {
+      ...model,
+      place: isOverList
+        ? Views.listScrolledBy(model, e.by)
+        : Views.bodyScrolledBy(model, e),
+    }
+
+    host.invalidate()
 
     return {}
   })
@@ -600,7 +774,9 @@ export function register(on: On) {
       }
 
       hasAutoOpened = false
-      bodyKey = null
+      bodyStamp = null
+      bodyBase = null
+      bodyLoads.clear()
       disarm(host)
       model = PaneState.afterNewSession(model)
     }

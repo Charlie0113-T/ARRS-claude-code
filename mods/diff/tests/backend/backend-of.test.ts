@@ -12,7 +12,11 @@ describe('backend-of', () => {
 
     expect((await Backend.backendOf(inGit.host, []))?.words.lister).toBe('git')
     expect(await Backend.backendOf(outside.host, [])).toBeNull()
-    expect([inGit.programs, outside.programs]).toEqual([['git'], ['git']])
+
+    expect([inGit.programs, outside.programs]).toEqual([
+      ['git', 'git'],
+      ['git'],
+    ])
   })
 
   test('a declining probe leaves a git working tree to git', async () => {
@@ -23,7 +27,7 @@ describe('backend-of', () => {
     expect(backend?.words.lister).toBe('git')
     expect(backend?.baseModes).toEqual(['session', 'uncommitted', 'branch'])
     expect(declining.asked).toEqual([inGit.host])
-    expect(inGit.programs).toEqual(['git'])
+    expect(inGit.programs).toEqual(['git', 'git'])
   })
 
   test('a probe that answers pins before git is asked', async () => {

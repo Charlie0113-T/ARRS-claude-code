@@ -32,11 +32,6 @@ export type Host = {
   every: TimerCall
 
   /**
-   * `$.clock.sleep`, no signal.
-   */
-  sleep: (ms: number) => Promise<void>
-
-  /**
    * `$.process.run`.
    */
   run: (

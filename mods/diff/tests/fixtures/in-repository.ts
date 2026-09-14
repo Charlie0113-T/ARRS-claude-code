@@ -11,14 +11,15 @@ import { startsSession } from './starts-session.js'
  * A session in a repository git answers for from a script (REPOSITORY, in
  * /work, when none is given), keeping what the plugin does there.
  *
- * Kept: each git run, pane opened or closed, and status line. The clock
+ * Kept: each git run, ring move, pane opened or closed, status line. The clock
  * starts at 0 and the engine draws the hint. A test that rewrites the
  * script between calls changes what git answers next.
  *
  * @param on the test's `on`
  * @param script git's output for each invocation whose line holds the key
  * @param stored what the plugin's store holds at the start
- * @returns the runs, the panes opened and closed, the statuses, the clock
+ * @returns the runs, the ring's moves, the panes opened and closed, the
+ *   statuses, the clock
  */
 export function inRepository(
   on: On,
@@ -26,6 +27,7 @@ export function inRepository(
   stored: Readonly<Record<string, unknown>> = {},
 ) {
   const runs: Args<'process.run'>[] = []
+  const focused: Args<'ui.focus'>[] = []
   const statuses: (string | undefined)[] = []
   const opened = keeping<Args<'ui.open'>>()
   const closed = keeping<Args<'ui.close'>>()
@@ -35,6 +37,12 @@ export function inRepository(
     runs.push(e)
 
     return { value: gitIn(e.argv, script) }
+  })
+
+  on('ui.focus', (_engine, e) => {
+    focused.push(e)
+
+    return {}
   })
 
   on('ui.status', ($, e) => {
@@ -50,5 +58,12 @@ export function inRepository(
   on('session.messages', () => ({ value: [] }))
   mock.store(on, stored)
 
-  return { runs, opened: opened.kept, closed: closed.kept, statuses, clock }
+  return {
+    runs,
+    focused,
+    opened: opened.kept,
+    closed: closed.kept,
+    statuses,
+    clock,
+  }
 }

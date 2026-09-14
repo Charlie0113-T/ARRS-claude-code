@@ -320,6 +320,7 @@ describe('register', () => {
         command: 'count',
         args: '',
         origin: { kind: 'composer' },
+        presentation: Fixtures.FULLSCREEN,
       })
 
       expect(text).toEndWith('$.telemetry.log: props.n: a number is finite')

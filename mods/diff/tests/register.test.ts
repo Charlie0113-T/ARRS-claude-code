@@ -122,13 +122,18 @@ describe('register', () => {
     ])
   })
 
-  test('/diff opens the pane over the session changes', async ($, on) => {
+  test('/diff opens the pane, unfocused, and says so', async ($, on) => {
     const world = Fixtures.inRepository(on)
 
     await $.session.start(Fixtures.SESSION)
 
-    expect(await $.command.run(Fixtures.DIFF)).toEqual({})
-    expect(world.opened.map(pane => pane.id)).toEqual(['diff'])
+    expect(await $.command.run(Fixtures.DIFF)).toEqual({
+      text: 'Diff panel shown',
+    })
+
+    expect(world.opened).toEqual([
+      { id: 'diff', title: 'Diff', holdToasts: true },
+    ])
 
     await world.clock.advance(Fixtures.SETTLE_MS)
 
@@ -138,23 +143,38 @@ describe('register', () => {
     expect(drawn).toContain('app.ts')
   })
 
-  test('the close button closes the pane; /diff reopens it', async ($, on) => {
+  test('off fullscreen, /diff opens the dialog, focused', async ($, on) => {
+    const world = Fixtures.inRepository(on)
+
+    await $.session.start(Fixtures.SESSION)
+
+    expect(await $.command.run(Fixtures.DIALOG_DIFF)).toEqual({})
+
+    expect(world.opened[0]).toEqual({
+      id: 'diff',
+      title: 'Diff',
+      holdToasts: true,
+      closeOnEscape: true,
+      rows: expect.any(Number),
+      focus: true,
+    })
+
+    expect(await $.command.run(Fixtures.DIALOG_DIFF)).toEqual({
+      text: 'Diff dialog dismissed',
+    })
+  })
+
+  test('/diff again closes the pane and says so', async ($, on) => {
     const world = Fixtures.inRepository(on)
 
     await $.session.start(Fixtures.SESSION)
     await $.command.run(Fixtures.DIFF)
-    await world.clock.advance(Fixtures.SETTLE_MS)
-    await $.ui.render(Fixtures.PANE)
 
-    expect(await $.ui.press({ plugin: 'diff', key: 'close' })).toEqual({
-      element: 'close',
+    expect(await $.command.run(Fixtures.DIFF)).toEqual({
+      text: 'Diff panel hidden',
     })
 
-    await world.clock.settle()
-
     expect(world.closed.map(pane => pane.id)).toEqual(['diff'])
-    expect(await $.command.run(Fixtures.DIFF)).toEqual({})
-    expect(world.opened.map(pane => pane.id)).toEqual(['diff', 'diff'])
   })
 
   test('a wide terminal opens the pane at the first edit', async ($, on) => {
@@ -205,7 +225,7 @@ describe('register', () => {
     await $.command.run(Fixtures.DIFF)
     await world.clock.advance(Fixtures.SETTLE_MS)
     await $.ui.render(Fixtures.PANE)
-    await $.ui.press({ plugin: 'diff', key: 'ask' })
+    await $.ui.press({ plugin: 'diff', key: 'ask:.env' })
     await world.clock.settle()
 
     const armed = Fixtures.jsonOf(await $.ui.render(Fixtures.PANE))
@@ -242,7 +262,7 @@ describe('register', () => {
     await $.command.run(Fixtures.DIFF)
     await world.clock.advance(Fixtures.SETTLE_MS)
     await $.ui.render(Fixtures.PANE)
-    await $.ui.press({ plugin: 'diff', key: 'ask' })
+    await $.ui.press({ plugin: 'diff', key: 'ask:.env' })
     await world.clock.settle()
 
     await $.prompt.submit(Fixtures.typedPromptOf('why?', [full]))
@@ -264,12 +284,10 @@ describe('register', () => {
     await $.command.run(Fixtures.DIFF)
     await world.clock.advance(Fixtures.SETTLE_MS)
 
-    const base = Fixtures.elementIn(await $.ui.render(Fixtures.PANE), {
-      type: 'Select',
-      name: 'base',
-    })
-
-    expect(base?.props).toMatchObject({ value: 'uncommitted' })
+    expect(
+      Fixtures.stringsOf(await $.ui.render(Fixtures.PANE)),
+      "the built-in's base line under the header",
+    ).toContain('uncommitted (vs HEAD)')
   })
 
   test('a repository made later is pinned once, on /diff', async ($, on) => {
@@ -302,7 +320,7 @@ describe('register', () => {
     )
 
     expect(before.text).toContain("isn't in a git repository")
-    expect(after).toEqual({})
+    expect(after.text).toBe('Diff panel shown')
     expect(world.opened[0]?.id).toBe('diff')
     expect(probes).toHaveLength(3)
 
@@ -369,13 +387,14 @@ describe('register', () => {
     const world = Fixtures.inRepository(on, Fixtures.oneSecret())
 
     await $.session.start(Fixtures.WORKTREE_SESSION)
-    await $.ui.render(Fixtures.hintAt(Limits.OPEN_MIN_COLUMNS - 1))
 
-    const narrow = await $.command.run(Fixtures.DIFF)
+    const narrow = await $.command.run(
+      Fixtures.diffAt(Limits.OPEN_MIN_COLUMNS - 1),
+    )
+
     const openedNarrow = [...world.opened]
 
-    await $.ui.render(Fixtures.hintAt(Limits.OPEN_MIN_COLUMNS))
-    await $.command.run(Fixtures.DIFF)
+    await $.command.run(Fixtures.diffAt(Limits.OPEN_MIN_COLUMNS))
 
     expect(narrow.text).toContain(
       'Resize your terminal to at least 110 columns to show the diff panel',
